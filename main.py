@@ -349,7 +349,10 @@ def main():
         else:
             st.warning("Dados de mês não disponíveis")
     
-    with col2:
+    # Top clientes e análise de consultores
+    col1, col2 = st.columns(2)
+    
+    with col1:
         st.subheader("🏢 Top 10 Clientes")
         top_clientes = df.groupby('CLIENTE')['QUANTIDADE_TOTAL'].sum().sort_values(ascending=False).head(10)
         
@@ -363,6 +366,27 @@ def main():
         )
         fig_clientes.update_layout(height=400, showlegend=False)
         st.plotly_chart(fig_clientes, use_container_width=True)
+    
+    with col2:
+        st.subheader("👨‍💼 Top 10 Consultores")
+        # Filtrar apenas consultores válidos (não nulos/vazios)
+        df_consultores = df[df['CONSULTOR'].notna() & (df['CONSULTOR'].str.strip() != '')].copy()
+        
+        if not df_consultores.empty:
+            top_consultores = df_consultores.groupby('CONSULTOR')['QUANTIDADE_TOTAL'].sum().sort_values(ascending=False).head(10)
+            
+            fig_consultores = px.bar(
+                x=top_consultores.values,
+                y=top_consultores.index,
+                orientation='h',
+                title="Consultores com Maior Volume de Vendas",
+                color=top_consultores.values,
+                color_continuous_scale='Blues'
+            )
+            fig_consultores.update_layout(height=400, showlegend=False)
+            st.plotly_chart(fig_consultores, use_container_width=True)
+        else:
+            st.warning("Dados de consultores não disponíveis")
     
     # Análise de modelos
     st.subheader("🔧 Análise por Modelo de Plaqueta")
@@ -417,6 +441,205 @@ def main():
     else:
         st.warning("Dados de modelos não disponíveis ou inválidos")
     
+    # === SEÇÃO COMPLETA DE ANÁLISE DE VENDEDORES/CONSULTORES ===
+    st.header("👨‍💼 Análise Detalhada dos Consultores")
+    
+    # Filtrar dados válidos de consultores
+    df_consultores = df[df['CONSULTOR'].notna() & (df['CONSULTOR'].str.strip() != '')].copy()
+    
+    if not df_consultores.empty:
+        # KPIs dos consultores
+        total_consultores = df_consultores['CONSULTOR'].nunique()
+        vendas_por_consultor = df_consultores.groupby('CONSULTOR').agg({
+            'QUANTIDADE_TOTAL': ['sum', 'count', 'mean'],
+            'CLIENTE': 'nunique',
+            'UF': 'nunique'
+        }).round(0)
+        
+        # Flatten column names
+        vendas_por_consultor.columns = ['Total_Plaquetas', 'Num_Vendas', 'Ticket_Medio', 'Clientes_Unicos', 'Estados_Atendidos']
+        vendas_por_consultor = vendas_por_consultor.reset_index()
+        vendas_por_consultor = vendas_por_consultor.sort_values('Total_Plaquetas', ascending=False)
+        
+        # Métricas gerais dos consultores
+        st.subheader("📊 Métricas Gerais da Equipe")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total de Consultores", total_consultores)
+        with col2:
+            media_vendas = vendas_por_consultor['Total_Plaquetas'].mean()
+            st.metric("Média por Consultor", f"{media_vendas:,.0f}")
+        with col3:
+            top_performer = vendas_por_consultor.iloc[0]
+            st.metric("Top Performer", top_performer['CONSULTOR'])
+        with col4:
+            participacao_top = (top_performer['Total_Plaquetas'] / df_consultores['QUANTIDADE_TOTAL'].sum() * 100)
+            st.metric("% do Top Performer", f"{participacao_top:.1f}%")
+        
+        # Ranking detalhado dos consultores
+        st.subheader("🏆 Ranking Completo dos Consultores")
+        
+        # Adicionar ranking e performance
+        vendas_por_consultor['Ranking'] = range(1, len(vendas_por_consultor) + 1)
+        vendas_por_consultor['Performance'] = pd.cut(
+            vendas_por_consultor['Total_Plaquetas'], 
+            bins=3, 
+            labels=['🟡 Básico', '🟠 Bom', '🟢 Excelente']
+        )
+        
+        # Tabela interativa
+        st.dataframe(
+            vendas_por_consultor[['Ranking', 'CONSULTOR', 'Total_Plaquetas', 'Num_Vendas', 
+                                'Ticket_Medio', 'Clientes_Unicos', 'Estados_Atendidos', 'Performance']],
+            column_config={
+                "Ranking": st.column_config.NumberColumn("🏆 Rank", format="%d"),
+                "CONSULTOR": "👨‍💼 Consultor",
+                "Total_Plaquetas": st.column_config.NumberColumn("📦 Total Plaquetas", format="%d"),
+                "Num_Vendas": st.column_config.NumberColumn("🔢 Nº Vendas", format="%d"),
+                "Ticket_Medio": st.column_config.NumberColumn("💰 Ticket Médio", format="%.0f"),
+                "Clientes_Unicos": st.column_config.NumberColumn("👥 Clientes", format="%d"),
+                "Estados_Atendidos": st.column_config.NumberColumn("🗺️ Estados", format="%d"),
+                "Performance": "⭐ Performance"
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+        
+        # Gráficos de análise dos consultores
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("📈 Volume vs Número de Vendas")
+            fig_scatter = px.scatter(
+                vendas_por_consultor,
+                x='Num_Vendas',
+                y='Total_Plaquetas',
+                size='Clientes_Unicos',
+                color='Performance',
+                hover_name='CONSULTOR',
+                title="Eficiência dos Consultores",
+                labels={
+                    'Num_Vendas': 'Número de Vendas',
+                    'Total_Plaquetas': 'Total de Plaquetas',
+                    'Clientes_Unicos': 'Clientes Únicos'
+                }
+            )
+            st.plotly_chart(fig_scatter, use_container_width=True)
+        
+        with col2:
+            st.subheader("🎯 Distribuição de Performance")
+            performance_count = vendas_por_consultor['Performance'].value_counts()
+            
+            fig_performance = px.pie(
+                values=performance_count.values,
+                names=performance_count.index,
+                title="Distribuição de Performance da Equipe",
+                color_discrete_map={
+                    '🟢 Excelente': '#27ae60',
+                    '🟠 Bom': '#f39c12', 
+                    '🟡 Básico': '#f1c40f'
+                }
+            )
+            st.plotly_chart(fig_performance, use_container_width=True)
+        
+        # Análise de eficiência
+        st.subheader("⚡ Análise de Eficiência")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Consultor mais eficiente (maior ticket médio)
+            mais_eficiente = vendas_por_consultor.loc[vendas_por_consultor['Ticket_Medio'].idxmax()]
+            st.info(f"""
+            **🎯 Maior Ticket Médio**
+            
+            👨‍💼 {mais_eficiente['CONSULTOR']}
+            
+            💰 {mais_eficiente['Ticket_Medio']:,.0f} plaquetas/venda
+            """)
+        
+        with col2:
+            # Consultor com mais diversidade de clientes
+            mais_diverso = vendas_por_consultor.loc[vendas_por_consultor['Clientes_Unicos'].idxmax()]
+            st.warning(f"""
+            **🌟 Maior Diversidade**
+            
+            👨‍💼 {mais_diverso['CONSULTOR']}
+            
+            👥 {mais_diverso['Clientes_Unicos']} clientes únicos
+            """)
+        
+        with col3:
+            # Consultor com maior abrangência geográfica
+            mais_abrangente = vendas_por_consultor.loc[vendas_por_consultor['Estados_Atendidos'].idxmax()]
+            st.success(f"""
+            **🗺️ Maior Abrangência**
+            
+            👨‍💼 {mais_abrangente['CONSULTOR']}
+            
+            📍 {mais_abrangente['Estados_Atendidos']} estados atendidos
+            """)
+        
+        # Análise temporal dos consultores
+        st.subheader("📅 Performance Temporal dos Consultores")
+        
+        # Vendas por consultor por mês
+        df_tempo_consultor = df_consultores[df_consultores['MES'].notna()].copy()
+        
+        if not df_tempo_consultor.empty:
+            vendas_mes_consultor = df_tempo_consultor.groupby(['MES', 'CONSULTOR'])['QUANTIDADE_TOTAL'].sum().reset_index()
+            
+            # Pegar apenas top 5 consultores para não poluir o gráfico
+            top5_consultores = vendas_por_consultor.head(5)['CONSULTOR'].tolist()
+            vendas_mes_top5 = vendas_mes_consultor[vendas_mes_consultor['CONSULTOR'].isin(top5_consultores)]
+            
+            meses_nomes = {1: 'Jan', 2: 'Fev', 3: 'Mar', 4: 'Abr', 5: 'Mai', 6: 'Jun', 
+                          7: 'Jul', 8: 'Ago', 9: 'Set', 10: 'Out', 11: 'Nov', 12: 'Dez'}
+            vendas_mes_top5['MES_NOME'] = vendas_mes_top5['MES'].map(meses_nomes)
+            
+            fig_temporal = px.line(
+                vendas_mes_top5,
+                x='MES_NOME',
+                y='QUANTIDADE_TOTAL',
+                color='CONSULTOR',
+                title="Evolução Mensal - Top 5 Consultores",
+                markers=True,
+                line_shape='spline'
+            )
+            fig_temporal.update_layout(height=400)
+            st.plotly_chart(fig_temporal, use_container_width=True)
+        
+        # Insights sobre consultores
+        st.subheader("💡 Insights da Equipe de Vendas")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Estatísticas da equipe
+            st.info(f"""
+            **📊 Estatísticas da Equipe**
+            
+            • **Média de vendas:** {vendas_por_consultor['Num_Vendas'].mean():.1f} vendas/consultor
+            • **Mediana de plaquetas:** {vendas_por_consultor['Total_Plaquetas'].median():,.0f}
+            • **Desvio padrão:** {vendas_por_consultor['Total_Plaquetas'].std():,.0f}
+            • **Amplitude:** {vendas_por_consultor['Total_Plaquetas'].max() - vendas_por_consultor['Total_Plaquetas'].min():,.0f}
+            """)
+        
+        with col2:
+            # Recomendações
+            st.success(f"""
+            **🎯 Recomendações**
+            
+            • **Benchmarking:** Analisar práticas do top performer
+            • **Treinamento:** Focar em consultores com performance básica
+            • **Incentivos:** Criar metas baseadas em ticket médio
+            • **Territórios:** Redistribuir regiões para maior eficiência
+            """)
+            
+    else:
+        st.warning("⚠️ Dados de consultores não disponíveis para análise detalhada.")
+    
     # Insights finais
     st.subheader("💡 Principais Insights")
     
@@ -443,13 +666,23 @@ def main():
     
     with col3:
         ticket_medio = total_plaquetas / total_vendas
-        st.success(f"""
-        **Performance Geral**
-        
-        📈 Ticket médio: {ticket_medio:.0f} plaquetas/venda
-        
-        🎯 {total_clientes} clientes em {total_estados} estados
-        """)
+        if not df_consultores.empty:
+            melhor_consultor = vendas_por_consultor.iloc[0]['CONSULTOR']
+            st.success(f"""
+            **Performance Geral**
+            
+            📈 Ticket médio: {ticket_medio:.0f} plaquetas/venda
+            
+            🌟 Top consultor: {melhor_consultor}
+            """)
+        else:
+            st.success(f"""
+            **Performance Geral**
+            
+            📈 Ticket médio: {ticket_medio:.0f} plaquetas/venda
+            
+            🎯 {total_clientes} clientes em {total_estados} estados
+            """)
 
 if __name__ == "__main__":
     main()
